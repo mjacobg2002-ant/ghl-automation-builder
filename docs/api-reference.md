@@ -446,6 +446,54 @@ fi
 
 ---
 
+## Auto-Save (Advanced Canvas Sync)
+
+Syncs workflow steps and triggers to Firebase/Firestore so they render in the advanced canvas builder. See [save-modes.md](save-modes.md) for detailed comparison of all save methods.
+
+```
+PUT /workflow/{locationId}/{workflowId}/auto-save
+```
+
+**Body:** Full workflow object with additional auto-save fields. The MCP worker (`ghl_workflow_builder_auto_save`) builds this payload automatically. Key fields:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `version` | number | Yes | Current workflow version |
+| `meta.advanceCanvasMeta.enabled` | boolean | Yes | Must be `true` to enable advanced canvas |
+| `workflowData.templates` | array | Yes | Steps with `advanceCanvasMeta.position` for canvas layout |
+| `triggersChanged` | boolean | Yes | Set `true` if triggers should be synced |
+| `oldTriggers` | array | Yes | Previous trigger state |
+| `newTriggers` | array | Yes | Current trigger state |
+| `isAutoSave` | boolean | Yes | Must be `true` |
+| `autoSaveSession` | object | Yes | Session tracking with `workflowId`, `id`, `userId`, `version`, `inProgress` |
+
+```bash
+# Simplified example -- in practice, use the MCP tool which builds the full payload
+curl -s -X PUT "$BASE/workflow/$LOC/$WF_ID/auto-save" \
+  "${HEADERS[@]}" \
+  -d '{
+    "version": '"$VERSION"',
+    "status": "draft",
+    "meta": {"advanceCanvasMeta": {"enabled": true}},
+    "workflowData": {"templates": [...]},
+    "triggersChanged": true,
+    "oldTriggers": [...],
+    "newTriggers": [...],
+    "isAutoSave": true,
+    "autoSaveSession": {
+      "workflowId": "'"$WF_ID"'",
+      "id": "'"$(uuidgen)"'",
+      "userId": "'"$USER_ID"'",
+      "version": '"$VERSION"',
+      "inProgress": true
+    }
+  }'
+```
+
+**Important:** Auto-save should be called AFTER `save_steps` and `create_trigger`. It is the final sync step that makes everything visible in the advanced canvas UI.
+
+---
+
 ## Utility Endpoints
 
 ### Error Notification Count

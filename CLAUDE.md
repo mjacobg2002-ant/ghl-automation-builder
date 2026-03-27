@@ -71,6 +71,7 @@ Deployed on `dlf-agency` Cloudflare Worker at `https://dlf-agency.skool-203.work
 |------|-------------|
 | `docs/api-reference.md` | Complete endpoint reference with curl examples for all CRUD operations |
 | `docs/auth.md` | Firebase JWT auth flow, token refresh, permission model |
+| `docs/save-modes.md` | Regular PUT vs auto-save vs publish — when to use each, build sequence |
 | `docs/data-schemas.md` | Workflow metadata object schema, Firebase Storage paths |
 | `docs/platform-architecture.md` | Module Federation, premium billing, feature flags, message type enum |
 | `schemas/action-trigger-types.md` | 95 action types + 93 trigger types with API type strings |

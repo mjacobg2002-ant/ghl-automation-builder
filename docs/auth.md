@@ -153,6 +153,132 @@ check_token() {
 }
 ```
 
+## MCP Worker Auto-Refresh Architecture
+
+The `dlf-agency` Cloudflare Worker implements automatic token refresh so MCP tools never hit expired tokens during automation builds.
+
+### Constants
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `FIREBASE_API_KEY` | `AIzaSyB_w3vXmsI7WeQtrIOkjR6xTRVN5uOieiE` | Firebase project key for `highlevel-backend` |
+| `KV_TOKEN_KEY` | `ghl_firebase_id_token` | KV key for cached ID token |
+| `KV_TOKEN_TTL` | `3300` (55 minutes) | Cache duration -- refresh 5 min before Firebase's 60-min expiry |
+
+### Refresh Flow
+
+The worker uses a **cache-first** strategy with automatic 401 retry:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ MCP Tool Call (e.g., save_steps)                        │
+│                                                         │
+│  1. getValidToken()                                     │
+│     ├─ Check KV for "ghl_firebase_id_token"             │
+│     ├─ FOUND (within 55-min TTL) → use cached token     │
+│     └─ NOT FOUND → refreshFirebaseToken()               │
+│         ├─ POST securetoken.googleapis.com/v1/token     │
+│         ├─ Store new ID token in KV (TTL: 3300s)        │
+│         └─ Return fresh token                           │
+│                                                         │
+│  2. Send API request with token-id header               │
+│                                                         │
+│  3. If 401 or 403 response:                             │
+│     ├─ Force refresh: refreshFirebaseToken()             │
+│     ├─ Update KV cache with new token                   │
+│     ├─ Retry request ONCE with new token                │
+│     └─ If retry fails: throw error (no further retries) │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Refresh Function (from `workflow-builder.ts`)
+
+```typescript
+async function refreshFirebaseToken(refreshToken: string) {
+  const resp = await fetch(
+    `https://securetoken.googleapis.com/v1/token?key=${FIREBASE_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: `grant_type=refresh_token&refresh_token=${encodeURIComponent(refreshToken)}`,
+    }
+  );
+  const data = await resp.json();
+  return { idToken: data.id_token, refreshToken: data.refresh_token };
+}
+```
+
+### Cache-First Token Retrieval
+
+```typescript
+async function getValidToken(config) {
+  // 1. Try KV cache first (zero latency)
+  const cached = await config.kv.get(KV_TOKEN_KEY);
+  if (cached) return cached;
+
+  // 2. Cache miss -- refresh from Firebase
+  const { idToken } = await refreshFirebaseToken(config.refreshToken);
+  await config.kv.put(KV_TOKEN_KEY, idToken, { expirationTtl: KV_TOKEN_TTL });
+  return idToken;
+}
+```
+
+### 401/403 Auto-Retry (from `internalRequest()`)
+
+```typescript
+if ((resp.status === 401 || resp.status === 403) && config.kv && config.refreshToken) {
+  // Force refresh -- token was invalidated mid-session
+  const { idToken } = await refreshFirebaseToken(config.refreshToken);
+  await config.kv.put(KV_TOKEN_KEY, idToken, { expirationTtl: KV_TOKEN_TTL });
+  headers["token-id"] = idToken;
+
+  // Single retry with fresh token
+  const retry = await fetch(`${INTERNAL_BASE}${path}`, { method, headers, body });
+  if (!retry.ok) throw new Error(`GHL Internal API ${retry.status}`);
+  return retry.json();
+}
+```
+
+### Admin Token Management Endpoints
+
+The worker exposes admin endpoints for token inspection and manual refresh:
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/admin/token/status` | GET | Check cached token expiry (parses JWT `exp` claim) |
+| `/admin/token/refresh` | POST | Force refresh with dynamic TTL: `min(expiresIn - 300, 3300)` |
+| `/admin/token/seed` | POST | Store a new refresh token (no TTL -- persists until revoked) |
+| `/cli/token` | GET | Return cached ID token for CLI scripts |
+
+### Multi-Module Token Sharing
+
+Both the workflow builder and site builder share the same KV cache key (`ghl_firebase_id_token`). This means:
+- First module to need a refresh performs it; second module reads cached result
+- No duplicate Firebase API calls within the 55-minute window
+- Site builder additionally requires `Authorization: Bearer` header (same JWT value)
+
+### Refresh Token Sources
+
+| Source | Storage | TTL |
+|--------|---------|-----|
+| Cloudflare secret `GHL_FIREBASE_REFRESH_TOKEN` | Environment variable | Never expires |
+| KV key `ghl_refresh_token` | KV namespace | No TTL (persists until revoked) |
+| D1 `sub_accounts.refreshToken` | Database column | Never expires |
+
+### Extracting a New Refresh Token
+
+If the refresh token stops working (account password change, session revocation):
+
+1. Open `app.gohighlevel.com` in Chrome
+2. Log in to the target location
+3. DevTools > Application > IndexedDB > `firebaseLocalStorageDb`
+4. Find the `spikey` object > extract `refreshToken`
+5. Update Cloudflare secret:
+   ```bash
+   cd ~/Desktop/GITHUB/dlf-ghl-mcp-server/dlf-ghl-mcp-server
+   echo 'NEW_TOKEN' | npx wrangler secret put GHL_FIREBASE_REFRESH_TOKEN
+   ```
+
 ## Permission Model
 
 The JWT's `permissions` object controls access:
