@@ -1,0 +1,22 @@
+{
+  "name": "ghl-workflow-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker MCP server exposing 16 tools for programmatic GHL workflow management via the reverse-engineered internal API.",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "tail": "wrangler tail",
+    "secret:refresh-token": "wrangler secret put GHL_FIREBASE_REFRESH_TOKEN",
+    "secret:admin-key": "wrangler secret put ADMIN_API_KEY"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260721.1",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.0.0"
+  }
+}

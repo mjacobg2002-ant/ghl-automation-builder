@@ -33,6 +33,7 @@ Claude Code Skills/Agents
 | `schemas/` | Complete action/trigger type schemas with attribute definitions |
 | `scripts/` | Token retrieval, verification pipeline scripts |
 | `verified/` | Confirmed API type strings from live workflow data |
+| `src/` | The Cloudflare Worker MCP server implementation (see below) |
 
 ## Available MCP Tools (16 total)
 
@@ -75,12 +76,71 @@ Firebase JWT via `token-id` header. Refresh token never expires, stored as Cloud
 
 Firebase JWT is scoped per-user/location. Current token covers Christians Testing only. Need separate tokens for DLF, TVAAI, etc.
 
+## Deploying the MCP Server
+
+`src/` contains a complete, buildable TypeScript Cloudflare Worker implementing all 16 tools above as an MCP server (hand-rolled JSON-RPC / Streamable HTTP transport -- stateless, no SSE, since none of these tools are long-running).
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Create the KV namespace
+
+The worker caches the Firebase ID token (55-min TTL) and the persisted refresh token in a KV namespace:
+
+```bash
+npx wrangler kv namespace create GHL_MCP_KV
+npx wrangler kv namespace create GHL_MCP_KV --preview
+```
+
+Copy the two `id` values it prints into `wrangler.toml`'s `[[kv_namespaces]]` block (`id` and `preview_id`).
+
+### 3. Set secrets
+
+```bash
+# Required -- see docs/auth.md "Extracting a New Refresh Token" for how to obtain one.
+npx wrangler secret put GHL_FIREBASE_REFRESH_TOKEN
+
+# Strongly recommended -- protects /admin/* and /cli/token once deployed.
+npx wrangler secret put ADMIN_API_KEY
+```
+
+### 4. (Optional) Set a default location
+
+If most of your workflow work targets one location, set `DEFAULT_LOCATION_ID` in `wrangler.toml`'s `[vars]` block so tools can omit `locationId`. Otherwise every tool call must pass it explicitly.
+
+### 5. Typecheck, run locally, deploy
+
+```bash
+npm run typecheck   # tsc --noEmit
+npm run dev          # wrangler dev -- MCP endpoint at http://localhost:8787/
+npm run deploy       # wrangler deploy
+```
+
+### 6. Point an MCP client at it
+
+The deployed Worker's root URL (`https://<your-worker>.<subdomain>.workers.dev/`, or `/mcp`) is a standard MCP Streamable HTTP endpoint: POST JSON-RPC 2.0 requests (`initialize`, `tools/list`, `tools/call`). Add it as a remote MCP server in Claude Code / Claude Desktop / any MCP-compatible client.
+
+### Other endpoints
+
+| Route | Method | Purpose |
+|-------|--------|---------|
+| `/` or `/mcp` | POST | MCP JSON-RPC endpoint (the 16 tools) |
+| `/health` | GET | Liveness check |
+| `/admin/token/status` | GET | Inspect the cached Firebase token's expiry |
+| `/admin/token/refresh` | POST | Force a token refresh |
+| `/admin/token/seed` | POST | Store a new refresh token (`{"refreshToken": "..."}`) if the old one is revoked |
+| `/cli/token` | GET | Return the cached ID token, for ad-hoc `curl`/script use |
+
+All `/admin/*` and `/cli/token` routes require `Authorization: Bearer <ADMIN_API_KEY>` once that secret is set.
+
 ## Next Steps
 
-1. Refresh expired Firebase JWT (extract from browser IndexedDB)
-2. Run verification pipeline (create test workflows with each action/trigger type)
-3. Discover workflow builder v2 service URL
-4. Build Claude Code skill for easy workflow management commands
+1. Run verification pipeline (create test workflows with each action/trigger type) to promote more registry entries from `confirmed: false` to `confirmed: true`
+2. Discover workflow builder v2 service URL
+3. Build Claude Code skill for easy workflow management commands
 
 ## Sources
 
