@@ -50,6 +50,7 @@ export const updateTriggerTool = defineTool({
       autoSaveResult = await performAutoSave(env, {
         locationId,
         workflowId,
+        name: metadata.name,
         userId: metadata.updatedBy,
         templates: steps,
         triggers: merged,

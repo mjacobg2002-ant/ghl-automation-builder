@@ -1,6 +1,6 @@
 import { performAutoSave } from "../ghl/autosave";
 import { internalRequest, GhlApiError } from "../ghl/client";
-import { getWorkflowMetadata, getWorkflowSteps, getWorkflowTriggers } from "../ghl/workflow";
+import { extractPersistentFields, getWorkflowMetadata, getWorkflowSteps, getWorkflowTriggers } from "../ghl/workflow";
 import type { ActionStep, WorkflowTrigger } from "../ghl/types";
 import { generateUuid } from "../util/uuid";
 import { defineTool } from "./definition";
@@ -68,6 +68,21 @@ export const cloneTool = defineTool({
     });
     const newWorkflowId = created.id;
 
+    // Verified live: POST /workflow/{loc} silently ignores `name` (see the
+    // create tool's notes) -- check and fix it here too, since clone creates
+    // via a raw request rather than going through createTool.
+    let createdMetadata = await getWorkflowMetadata(env, targetLocationId, newWorkflowId);
+    let nameWasCorrected = false;
+    if (createdMetadata.name !== name) {
+      await internalRequest(env, {
+        method: "PUT",
+        path: `/workflow/${targetLocationId}/${newWorkflowId}`,
+        body: { version: createdMetadata.version, ...extractPersistentFields(createdMetadata), name, workflowData: { templates: remappedTemplates } },
+      });
+      nameWasCorrected = true;
+      createdMetadata = await getWorkflowMetadata(env, targetLocationId, newWorkflowId);
+    }
+
     const createdTriggers: CreatedTriggerResult[] = [];
     if (cloneTriggers && sameLocation) {
       for (const trigger of sourceTriggers) {
@@ -97,7 +112,6 @@ export const cloneTool = defineTool({
 
     let autoSaveResult: unknown = "skipped";
     try {
-      const newMetadata = await getWorkflowMetadata(env, targetLocationId, newWorkflowId);
       const newTriggersForAutoSave: WorkflowTrigger[] = createdTriggers
         .filter((t): t is CreatedTriggerResult & { id: string } => Boolean(t.id))
         .map((t) => ({
@@ -112,10 +126,11 @@ export const cloneTool = defineTool({
       autoSaveResult = await performAutoSave(env, {
         locationId: targetLocationId,
         workflowId: newWorkflowId,
+        name: createdMetadata.name,
         userId: sourceMetadata.updatedBy,
         templates: remappedTemplates,
         triggers: newTriggersForAutoSave,
-        version: newMetadata.version,
+        version: createdMetadata.version,
         status: "draft",
       });
     } catch (err) {
@@ -130,7 +145,7 @@ export const cloneTool = defineTool({
         stepCount: sourceTemplates.length,
         triggerCount: sourceTriggers.length,
       },
-      clone: { locationId: targetLocationId, workflowId: newWorkflowId, name },
+      clone: { locationId: targetLocationId, workflowId: newWorkflowId, name: createdMetadata.name, nameWasCorrected },
       triggersSkippedReason:
         !sameLocation && sourceTriggers.length > 0
           ? "Cross-location trigger cloning requires manual remapping of resource IDs (calendars, forms, pipelines); triggers were not recreated."

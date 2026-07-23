@@ -1,9 +1,11 @@
 /**
- * Firebase JWT refresh + KV caching, per docs/auth.md "MCP Worker Auto-Refresh
- * Architecture". Cache-first: reads the cached ID token from KV; on a cache
- * miss (or a downstream 401/403 in ghl/client.ts) it exchanges the refresh
- * token for a new ID token via the Firebase Secure Token API and re-caches it
- * with a TTL 5 minutes short of Firebase's real ~60-minute expiry.
+ * Firebase JWT refresh + token-store caching, per docs/auth.md "MCP Worker
+ * Auto-Refresh Architecture". Cache-first: reads the cached ID token from the
+ * runtime's TokenStore (Cloudflare KV when deployed, a local JSON file in
+ * stdio mode); on a cache miss (or a downstream 401/403 in ghl/client.ts) it
+ * exchanges the refresh token for a new ID token via the Firebase Secure
+ * Token API and re-caches it with a TTL 5 minutes short of Firebase's real
+ * ~60-minute expiry.
  */
 import type { Env } from "../types/env";
 
@@ -48,20 +50,21 @@ export async function refreshFirebaseToken(env: Env, refreshToken: string): Prom
 }
 
 async function getRefreshToken(env: Env): Promise<string> {
-  const kvToken = await env.GHL_MCP_KV.get(REFRESH_TOKEN_KV_KEY);
-  const token = kvToken || env.GHL_FIREBASE_REFRESH_TOKEN;
+  const storedToken = await env.tokenStore.get(REFRESH_TOKEN_KV_KEY);
+  const token = storedToken || env.GHL_FIREBASE_REFRESH_TOKEN;
   if (!token) {
     throw new Error(
-      "No Firebase refresh token available. Set the GHL_FIREBASE_REFRESH_TOKEN secret " +
-        "(`wrangler secret put GHL_FIREBASE_REFRESH_TOKEN`) or seed one via POST /admin/token/seed."
+      "No Firebase refresh token available. Set the GHL_FIREBASE_REFRESH_TOKEN environment variable " +
+        "(local stdio server) or secret (`wrangler secret put GHL_FIREBASE_REFRESH_TOKEN`, deployed Worker only), " +
+        "or seed one via POST /admin/token/seed (Worker only)."
     );
   }
   return token;
 }
 
-/** Cache-first token retrieval: KV hit is zero-latency, miss triggers a refresh. */
+/** Cache-first token retrieval: a token-store hit is fast, a miss triggers a refresh. */
 export async function getValidToken(env: Env): Promise<string> {
-  const cached = await env.GHL_MCP_KV.get(env.KV_TOKEN_KEY);
+  const cached = await env.tokenStore.get(env.KV_TOKEN_KEY);
   if (cached) return cached;
   return forceRefreshToken(env);
 }
@@ -73,13 +76,13 @@ export async function forceRefreshToken(env: Env): Promise<string> {
 
   const configuredTtl = Number(env.KV_TOKEN_TTL_SECONDS) || DEFAULT_TTL_SECONDS;
   const ttl = Math.max(60, Math.min(expiresIn - 300, configuredTtl));
-  await env.GHL_MCP_KV.put(env.KV_TOKEN_KEY, idToken, { expirationTtl: ttl });
+  await env.tokenStore.put(env.KV_TOKEN_KEY, idToken, { expirationTtl: ttl });
 
   // Firebase rotates the refresh token on each exchange; persist the new one
   // so future refreshes (and the GHL_FIREBASE_REFRESH_TOKEN secret, if never
   // updated) don't silently fall behind.
   if (newRefreshToken && newRefreshToken !== refreshToken) {
-    await env.GHL_MCP_KV.put(REFRESH_TOKEN_KV_KEY, newRefreshToken);
+    await env.tokenStore.put(REFRESH_TOKEN_KV_KEY, newRefreshToken);
   }
 
   return idToken;

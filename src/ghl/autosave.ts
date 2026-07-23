@@ -17,6 +17,10 @@ import { generateUuid } from "../util/uuid";
 export interface AutoSaveOptions {
   locationId: string;
   workflowId: string;
+  // Required, not optional: verified live that omitting `name` from this PUT
+  // silently clears it (see ghl/workflow.ts extractPersistentFields). Always
+  // pass the workflow's current name (or its just-corrected one) here.
+  name: string;
   userId?: string;
   templates: ActionStep[];
   triggers: WorkflowTrigger[];
@@ -57,6 +61,7 @@ export async function performAutoSave(env: Env, opts: AutoSaveOptions): Promise<
 
   const body = {
     version: opts.version,
+    name: opts.name,
     status: opts.status ?? "draft",
     meta: { advanceCanvasMeta: { enabled: true, enabledAt: new Date().toISOString() } },
     workflowData: { templates: withCanvasPosition(opts.templates) },

@@ -1,5 +1,5 @@
 import { internalRequest } from "../ghl/client";
-import { getWorkflowMetadata } from "../ghl/workflow";
+import { extractPersistentFields, getWorkflowMetadata, getWorkflowSteps } from "../ghl/workflow";
 import { defineTool } from "./definition";
 import { optionalNumber, optionalString, requireString, resolveLocationId } from "./helpers";
 
@@ -8,7 +8,8 @@ const PASSTHROUGH_BOOLEAN_FIELDS = ["allowMultiple", "removeContactFromLastStep"
 export const updateTool = defineTool({
   name: "ghl_workflow_builder_update",
   description:
-    "Update workflow name and/or settings (version is required by the API and auto-fetched via GET if not supplied). To update action steps use save_steps instead -- it also keeps the advanced canvas in sync.",
+    "Update workflow name and/or settings (version is required by the API and auto-fetched via GET if not supplied). To update action steps use save_steps instead -- it also keeps the advanced canvas in sync. " +
+    "IMPORTANT: verified live against a real account -- PUT /workflow/{loc}/{wfId} is a full-document replace, not a partial patch: any of `name`, `timezone`, `allowMultiple`, `removeContactFromLastStep`, `stopOnResponse`, `autoMarkAsRead`, or `workflowData.templates` omitted from the body gets silently cleared, not left alone. This tool always re-fetches and re-includes ALL current persistent fields and steps, applying only the fields you actually pass as overrides, so a partial update never wipes anything you didn't intend to change.",
   inputSchema: {
     type: "object",
     required: ["workflowId"],
@@ -28,13 +29,17 @@ export const updateTool = defineTool({
     const locationId = resolveLocationId(args, env);
     const workflowId = requireString(args, "workflowId");
 
-    let version = optionalNumber(args, "version");
-    if (version === undefined) {
-      const current = await getWorkflowMetadata(env, locationId, workflowId);
-      version = current.version;
-    }
+    const explicitVersion = optionalNumber(args, "version");
+    const current = await getWorkflowMetadata(env, locationId, workflowId);
+    const version = explicitVersion ?? current.version;
+    const currentSteps = await getWorkflowSteps(env, current);
 
-    const body: Record<string, unknown> = { version };
+    const body: Record<string, unknown> = {
+      version,
+      ...extractPersistentFields(current),
+      workflowData: { templates: currentSteps },
+    };
+
     const name = optionalString(args, "name");
     if (name) body.name = name;
     const timezone = optionalString(args, "timezone");

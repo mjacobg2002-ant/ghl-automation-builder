@@ -1,6 +1,6 @@
 import { performAutoSave } from "../ghl/autosave";
 import { internalRequest } from "../ghl/client";
-import { getWorkflowMetadata, getWorkflowTriggers } from "../ghl/workflow";
+import { extractPersistentFields, getWorkflowMetadata, getWorkflowTriggers } from "../ghl/workflow";
 import { defineTool } from "./definition";
 import { optionalBoolean, optionalNumber, optionalString, requireString, resolveLocationId, ToolInputError } from "./helpers";
 import { normalizeTemplates } from "./templateUtils";
@@ -34,10 +34,13 @@ export const saveStepsTool = defineTool({
     const current = await getWorkflowMetadata(env, locationId, workflowId);
     const version = optionalNumber(args, "version") ?? current.version;
 
+    // extractPersistentFields: PUT here is a full-document replace on this
+    // API, verified live -- omitting `name` (or other settings) wipes them,
+    // not just leaves them unchanged. Always round-trip current values.
     const saveResult = await internalRequest(env, {
       method: "PUT",
       path: `/workflow/${locationId}/${workflowId}`,
-      body: { version, workflowData: { templates } },
+      body: { version, ...extractPersistentFields(current), workflowData: { templates } },
     });
 
     let autoSaveResult: unknown = "skipped";
@@ -47,6 +50,7 @@ export const saveStepsTool = defineTool({
       autoSaveResult = await performAutoSave(env, {
         locationId,
         workflowId,
+        name: refreshed.name,
         userId: optionalString(args, "userId") ?? refreshed.updatedBy,
         templates,
         triggers: existingTriggers,

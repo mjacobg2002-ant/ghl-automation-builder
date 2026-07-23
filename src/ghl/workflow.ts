@@ -26,3 +26,32 @@ export async function getWorkflowTriggers(env: Env, metadata: WorkflowMetadata):
   if (data && "triggers" in data && Array.isArray(data.triggers)) return data.triggers;
   return [];
 }
+
+export interface PersistentWorkflowFields {
+  name: string;
+  timezone?: string;
+  allowMultiple?: boolean;
+  removeContactFromLastStep?: boolean;
+  stopOnResponse?: boolean;
+  autoMarkAsRead?: boolean;
+}
+
+/**
+ * Verified live against a real account (2026-07-23): both
+ * `PUT /workflow/{loc}/{wfId}` and `PUT .../auto-save` do a full-document
+ * replace, not a partial patch -- any of these fields omitted from the
+ * request body gets silently cleared server-side (confirmed for both `name`
+ * and `workflowData.templates`). Every write path must spread these current
+ * values into its body first, then let explicit overrides win, or it risks
+ * wiping metadata that wasn't even part of the intended change.
+ */
+export function extractPersistentFields(meta: WorkflowMetadata): PersistentWorkflowFields {
+  return {
+    name: meta.name,
+    timezone: meta.timezone,
+    allowMultiple: meta.allowMultiple,
+    removeContactFromLastStep: meta.removeContactFromLastStep,
+    stopOnResponse: meta.stopOnResponse,
+    autoMarkAsRead: meta.autoMarkAsRead,
+  };
+}

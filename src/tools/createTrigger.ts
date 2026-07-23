@@ -85,6 +85,7 @@ export const createTriggerTool = defineTool({
       autoSaveResult = await performAutoSave(env, {
         locationId,
         workflowId,
+        name: metadata.name,
         userId: metadata.updatedBy,
         templates: steps,
         triggers: [...existingTriggers.filter((t) => t.id !== triggerId), newTrigger],

@@ -1,0 +1,8 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src"],
+  "exclude": ["src/index.ts", "src/worker", "src/auth/kvTokenStore.ts", "src/admin", "src/mcp/server.ts"]
+}

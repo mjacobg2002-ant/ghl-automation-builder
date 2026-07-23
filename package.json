@@ -6,16 +6,21 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
+    "mcp:local": "tsx src/local/stdio.ts",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit",
+    "typecheck": "npm run typecheck:worker && npm run typecheck:local",
+    "typecheck:worker": "tsc --noEmit",
+    "typecheck:local": "tsc --noEmit -p tsconfig.local.json",
+    "build": "npm run typecheck",
     "tail": "wrangler tail",
     "secret:refresh-token": "wrangler secret put GHL_FIREBASE_REFRESH_TOKEN",
     "secret:admin-key": "wrangler secret put ADMIN_API_KEY"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260721.1",
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.7.2",
     "wrangler": "^4.0.0"
   }

@@ -26,7 +26,7 @@ export async function handleAdminRoute(request: Request, env: Env, pathname: str
   }
 
   if (pathname === "/admin/token/status" && request.method === "GET") {
-    const cached = await env.GHL_MCP_KV.get(env.KV_TOKEN_KEY);
+    const cached = await env.tokenStore.get(env.KV_TOKEN_KEY);
     if (!cached) return json({ cached: false });
     return json({ cached: true, ...decodeJwtExpiry(cached) });
   }
@@ -45,8 +45,8 @@ export async function handleAdminRoute(request: Request, env: Env, pathname: str
     }
     if (!body.refreshToken) return json({ error: '"refreshToken" is required' }, 400);
 
-    await env.GHL_MCP_KV.put(REFRESH_TOKEN_KV_KEY, body.refreshToken);
-    await env.GHL_MCP_KV.delete(env.KV_TOKEN_KEY); // force a fresh exchange on next use
+    await env.tokenStore.put(REFRESH_TOKEN_KV_KEY, body.refreshToken);
+    await env.tokenStore.delete(env.KV_TOKEN_KEY); // force a fresh exchange on next use
     return json({ seeded: true });
   }
 
